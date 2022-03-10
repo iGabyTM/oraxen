@@ -5,16 +5,12 @@ import io.th0rgal.oraxen.OraxenPlugin;
 import io.th0rgal.oraxen.mechanics.Mechanic;
 import io.th0rgal.oraxen.mechanics.MechanicFactory;
 import io.th0rgal.oraxen.mechanics.MechanicsManager;
-import io.th0rgal.oraxen.utils.logs.Logs;
 import org.bukkit.Bukkit;
-import org.bukkit.Instrument;
 import org.bukkit.Material;
-import org.bukkit.Note;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
+import org.bukkit.block.data.Attachable;
 import org.bukkit.block.data.BlockData;
-import org.bukkit.block.data.MultipleFacing;
-import org.bukkit.block.data.type.NoteBlock;
 import org.bukkit.block.data.type.Tripwire;
 import org.bukkit.configuration.ConfigurationSection;
 
@@ -24,6 +20,15 @@ import java.util.List;
 import java.util.Map;
 
 public class StringBlockMechanicFactory extends MechanicFactory {
+
+    private static final int WEST = 1;
+    private static final int SOUTH = 2;
+    private static final int NORTH = 3;
+    private static final int ATTACHED = 4;
+    private static final int DISARMED = 5;
+    private static final int POWERED = 6;
+
+    private static final List<BlockFace> BLOCK_FACES = Arrays.asList(BlockFace.EAST, BlockFace.WEST, BlockFace.SOUTH, BlockFace.NORTH);
 
     public static final Map<Integer, StringBlockMechanic> BLOCK_PER_VARIATION = new HashMap<>();
     private static JsonObject variants;
@@ -41,9 +46,26 @@ public class StringBlockMechanicFactory extends MechanicFactory {
                 packFolder -> {
                     OraxenPlugin.get().getResourcePack()
                             .writeStringToVirtual("assets/minecraft/blockstates",
-                                    "tripwire.json", getBlockstateContent());
+                                    "tripwire.json", getBlockStateContent());
                 });
         MechanicsManager.registerListeners(OraxenPlugin.get(), new StringBlockMechanicListener(this));
+    }
+
+    /**
+     * Get the state of a property of {@link Tripwire}
+     * @param id id if texture
+     * @param index property index
+     * @return whether the property is true of false
+     * @see BlockFace#EAST
+     * @see BlockFace#WEST
+     * @see BlockFace#SOUTH
+     * @see BlockFace#NORTH
+     * @see Attachable#isAttached()
+     * @see Tripwire#isDisarmed()
+     * @see Tripwire#isPowered()
+     */
+    private static boolean getState(int id, int index) {
+        return ((id >> index) & 1) == 1;
     }
 
     public static JsonObject getModelJson(String modelName) {
@@ -52,14 +74,16 @@ public class StringBlockMechanicFactory extends MechanicFactory {
         return content;
     }
 
-    public static String getBlockstateVariantName(int id) {
-        return "east=" + ((id & 1) == 1 ? "true" : "false")
-                + ",west=" + (((id >> 1) & 1) == 1 ? "true" : "false")
-                + ",south=" + (((id >> 2) & 1) == 1 ? "true" : "false")
-                + ",north=" + (((id >> 3) & 1) == 1 ? "true" : "false")
-                + ",attached=" + (((id >> 4) & 1) == 1 ? "true" : "false")
-                + ",disarmed=" + (((id >> 5) & 1) == 1 ? "true" : "false")
-                + ",powered=" + (((id >> 6) & 1) == 1 ? "true" : "false");
+    public static String getBlockStateVariantName(int id) {
+        return "east=%b,west=%b,south=%b,north=%b,attached=%b,disarmed=%b,powered=%b".formatted(
+                ((id & 1) == 1),
+                getState(id, WEST),
+                getState(id, NORTH),
+                getState(id, SOUTH),
+                getState(id, ATTACHED),
+                getState(id, DISARMED),
+                getState(id, POWERED)
+        );
     }
 
     public static StringBlockMechanic getBlockMechanic(int customVariation) {
@@ -83,16 +107,16 @@ public class StringBlockMechanicFactory extends MechanicFactory {
         block.setBlockData(createTripwireData(noteBlockMechanic.getCustomVariation()), false);
     }
 
-    private String getBlockstateContent() {
-        JsonObject noteblock = new JsonObject();
-        noteblock.add("variants", variants);
-        return noteblock.toString();
+    private String getBlockStateContent() {
+        JsonObject tripwire = new JsonObject();
+        tripwire.add("variants", variants);
+        return tripwire.toString();
     }
 
     @Override
     public Mechanic parse(ConfigurationSection itemMechanicConfiguration) {
         StringBlockMechanic mechanic = new StringBlockMechanic(this, itemMechanicConfiguration);
-        variants.add(getBlockstateVariantName(mechanic.getCustomVariation()),
+        variants.add(getBlockStateVariantName(mechanic.getCustomVariation()),
                 getModelJson(mechanic.getModel(itemMechanicConfiguration.getParent()
                         .getParent())));
         BLOCK_PER_VARIATION.put(mechanic.getCustomVariation(), mechanic);
@@ -101,17 +125,15 @@ public class StringBlockMechanicFactory extends MechanicFactory {
     }
 
     public static int getCode(final Tripwire blockData) {
-        final List<BlockFace> properties = Arrays
-                .asList(BlockFace.EAST, BlockFace.WEST, BlockFace.SOUTH, BlockFace.NORTH);
         int sum = 0;
         for (final BlockFace blockFace : blockData.getFaces())
-            sum += (int) Math.pow(2, properties.indexOf(blockFace));
+            sum += (int) Math.pow(2, BLOCK_FACES.indexOf(blockFace));
         if (blockData.isAttached())
-            sum += (int) Math.pow(2, 4);
+            sum += (int) Math.pow(2, ATTACHED);
         if (blockData.isDisarmed())
-            sum += (int) Math.pow(2, 5);
+            sum += (int) Math.pow(2, DISARMED);
         if (blockData.isPowered())
-            sum += (int) Math.pow(2, 6);
+            sum += (int) Math.pow(2, POWERED);
         return sum;
     }
 
@@ -123,8 +145,7 @@ public class StringBlockMechanicFactory extends MechanicFactory {
     public static BlockData createTripwireData(final int code) {
         Tripwire data = ((Tripwire) Bukkit.createBlockData(Material.TRIPWIRE));
         int i = 0;
-        for (BlockFace face : new BlockFace[]{BlockFace.EAST, BlockFace.WEST, BlockFace.SOUTH,
-                BlockFace.NORTH})
+        for (final BlockFace face : BLOCK_FACES)
             data.setFace(face, (code & 0x1 << i++) != 0);
         data.setAttached((code & 0x1 << i++) != 0);
         data.setDisarmed((code & 0x1 << i++) != 0);
